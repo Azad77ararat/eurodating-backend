@@ -1,10 +1,13 @@
 const db = require('../config/db');
 const multer = require('multer');
-const path = require('path');
-const sharp = require('sharp');
-const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
 
-// Multer config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -15,7 +18,6 @@ const upload = multer({
   }
 });
 
-// GET /api/users/:uuid - Get user profile
 const getProfile = async (req, res) => {
   try {
     const [users] = await db.execute(
@@ -39,7 +41,6 @@ const getProfile = async (req, res) => {
     user.interests = user.interests ? user.interests.split(',') : [];
     user.age = Math.floor((new Date() - new Date(user.birth_date)) / (365.25 * 24 * 60 * 60 * 1000));
 
-    // Record profile view
     if (req.user && req.user.id !== user.id) {
       await db.execute(
         'INSERT INTO profile_views (viewer_id, viewed_id) VALUES (?, ?)',
@@ -54,7 +55,6 @@ const getProfile = async (req, res) => {
   }
 };
 
-// PUT /api/users/profile - Update profile
 const updateProfile = async (req, res) => {
   try {
     const {
@@ -71,7 +71,6 @@ const updateProfile = async (req, res) => {
        country, city, latitude, longitude, looking_for, language_preference, req.user.id]
     );
 
-    // Update interests
     if (interests && Array.isArray(interests)) {
       await db.execute('DELETE FROM user_interests WHERE user_id = ?', [req.user.id]);
       for (const interest of interests.slice(0, 20)) {
@@ -86,27 +85,24 @@ const updateProfile = async (req, res) => {
   }
 };
 
-// POST /api/users/photo - Upload photo
 const uploadPhoto = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Check photo limit (max 9)
     const [photos] = await db.execute('SELECT id FROM user_photos WHERE user_id = ?', [userId]);
     if (photos.length >= 9) {
       return res.status(400).json({ error: 'Maximum 9 photos allowed' });
     }
 
-    const filename = `${userId}_${Date.now()}.jpg`;
-    const uploadDir = path.join(__dirname, '../../uploads/photos');
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: 'eurodating', transformation: [{ width: 800, height: 800, crop: 'cover' }, { quality: 85 }] },
+        (error, result) => { if (error) reject(error); else resolve(result); }
+      );
+      stream.end(req.file.buffer);
+    });
 
-    await sharp(req.file.buffer)
-      .resize(800, 800, { fit: 'cover' })
-      .jpeg({ quality: 85 })
-      .toFile(path.join(uploadDir, filename));
-
-    const photoUrl = `/uploads/photos/${filename}`;
+    const photoUrl = result.secure_url;
     const isPrimary = photos.length === 0;
 
     await db.execute(
@@ -125,7 +121,6 @@ const uploadPhoto = async (req, res) => {
   }
 };
 
-// DELETE /api/users/photo/:id
 const deletePhoto = async (req, res) => {
   try {
     const [photos] = await db.execute(
@@ -136,8 +131,11 @@ const deletePhoto = async (req, res) => {
     if (!photos.length) return res.status(404).json({ error: 'Photo not found' });
 
     const photo = photos[0];
-    const filePath = path.join(__dirname, '../..', photo.photo_url);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    if (photo.photo_url.includes('cloudinary.com')) {
+      const publicId = photo.photo_url.split('/').slice(-2).join('/').split('.')[0];
+      await cloudinary.uploader.destroy(publicId).catch(() => {});
+    }
 
     await db.execute('DELETE FROM user_photos WHERE id = ?', [photo.id]);
 
@@ -160,7 +158,6 @@ const deletePhoto = async (req, res) => {
   }
 };
 
-// GET /api/users/views - Who viewed my profile
 const getProfileViews = async (req, res) => {
   try {
     const [views] = await db.execute(
@@ -180,7 +177,6 @@ const getProfileViews = async (req, res) => {
   }
 };
 
-// POST /api/users/report
 const reportUser = async (req, res) => {
   try {
     const { reported_uuid, reason, description } = req.body;
@@ -197,7 +193,6 @@ const reportUser = async (req, res) => {
   }
 };
 
-// POST /api/users/block
 const blockUser = async (req, res) => {
   try {
     const { blocked_uuid } = req.body;
