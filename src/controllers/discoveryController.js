@@ -61,7 +61,7 @@ const getDiscovery = async (req, res) => {
        WHERE u.id != ?
          AND u.is_active = TRUE
          AND u.is_banned = FALSE
-         AND u.profile_photo IS NOT NULL
+         AND 1=1
          ${genderClause}
          AND FLOOR(DATEDIFF(NOW(), u.birth_date) / 365.25) BETWEEN ? AND ?
          AND u.id NOT IN (SELECT swiped_id FROM swipes WHERE swiper_id = ?)
