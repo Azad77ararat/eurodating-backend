@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
@@ -33,6 +34,15 @@ require('./socket/socketHandler')(io);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', app: 'EuroDating' }));
+
+// Keep-alive ping كل 14 دقيقة
+setInterval(() => {
+  https.get('https://eurodating-backend.onrender.com/health', (res) => {
+    console.log(`Keep-alive ping: ${res.statusCode}`);
+  }).on('error', (err) => {
+    console.log(`Keep-alive error: ${err.message}`);
+  });
+}, 14 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
